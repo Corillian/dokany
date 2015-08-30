@@ -110,6 +110,7 @@ extern NPAGED_LOOKASIDE_LIST	DokanIrpEntryLookasideList;
 typedef enum _FSD_IDENTIFIER_TYPE {
 	DGL = ':DGL', // Dokan Global
     DCB = ':DCB', // Disk Control Block
+	FSCB = ':SCB', // File System Control Block
     VCB = ':VCB', // Volume Control Block
     FCB = ':FCB', // File Control Block
     CCB = ':CCB', // Context Control Block
@@ -163,6 +164,7 @@ typedef struct _DokanDiskControlBlock {
 	PDRIVER_OBJECT			DriverObject;
 	PDEVICE_OBJECT			DeviceObject;
 	
+	PVOID					FScb;
 	PVOID					Vcb;
 
 	// the list of waiting Event
@@ -206,6 +208,17 @@ typedef struct _DokanDiskControlBlock {
 
     ULONG           IrpTimeout;
 } DokanDCB, *PDokanDCB;
+
+
+typedef struct _DokanFileSystemControlBlock {
+
+	FSD_IDENTIFIER				Identifier;
+
+	ERESOURCE					Resource;
+	PDEVICE_OBJECT				DeviceObject;
+	PDokanDCB					Dcb;
+
+} DokanFSCB, *PDokanFSCB;
 
 
 typedef struct _DokanVolumeControlBlock {

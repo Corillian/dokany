@@ -198,12 +198,14 @@ CreateDriveLetter(
 	LPCWSTR	DeviceName)
 {
 	WCHAR   dosDevice[] = L"\\\\.\\C:";
-	WCHAR   driveName[] = L"C:";
+	WCHAR   driveName[] = L"C:\\";
+	WCHAR	rawVolumeName[MAX_PATH] = L"\\?\\Volume{x}";
 	WCHAR	rawDeviceName[MAX_PATH] = L"\\Device";
 	HANDLE  device;
 
 	dosDevice[4] = DriveLetter;
 	driveName[0] = DriveLetter;
+	driveName[2] = L'\0';
 	wcscat_s(rawDeviceName, MAX_PATH, DeviceName);
 
 	DbgPrintW(L"DriveLetter: %c, DeviceName %s\n", DriveLetter, rawDeviceName);
@@ -232,6 +234,22 @@ CreateDriveLetter(
 		DbgPrintW(L"DokanControl DefineDosDevice failed: %d\n", GetLastError());
         return FALSE;
     }
+
+	// This to notify Mount Manager about the mount point
+	// Kind of a hack because mount point should normally be allocated by Mount Manager directly
+	// through IOCTL_MOUNTMGR_CREATE_POINT for instance
+	driveName[2] = L'\\';
+	if (!GetVolumeNameForVolumeMountPoint(driveName, rawVolumeName, MAX_PATH)) {
+		DbgPrint("Error: GetVolumeNameForVolumeMountPoint failed : %d\n", GetLastError());
+	} else {
+		DbgPrint("UniqueVolumeName %ws\n", rawDeviceName);
+		DefineDosDevice(DDD_REMOVE_DEFINITION, &dosDevice[4], NULL);
+
+		if (!SetVolumeMountPoint(driveName, rawVolumeName)) {
+			DbgPrint("Error: SetVolumeMountPoint failed : %d\n", GetLastError());
+			return FALSE;
+		}
+	}
 
 	device = CreateFile(
         dosDevice,
@@ -281,9 +299,14 @@ DokanControlUnmount(
 		(length == 2 && MountPoint[1] == L':') ||
 		(length == 3 && MountPoint[1] == L':' && MountPoint[2] == L'\\')) {
 
-		WCHAR   drive[] = L"C:";	
+		WCHAR   drive[] = L"C:\\";	
 	    drive[0] = MountPoint[0];
 
+		if (!DeleteVolumeMountPoint(drive)) {
+			DbgPrintW(L"DokanControl DeleteVolumeMountPoint failed\n");
+		}
+		drive[2] = L'\0';
+		
 		if (!DefineDosDevice(DDD_REMOVE_DEFINITION, drive, NULL)) {
 			DbgPrintW(L"DriveLetter %c\n", MountPoint[0]);
 			DbgPrintW(L"DokanControl DefineDosDevice failed\n");

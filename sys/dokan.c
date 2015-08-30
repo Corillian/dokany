@@ -340,59 +340,6 @@ DokanDispatchShutdown(
 
 
 
-
-NTSTATUS
-DokanDispatchPnp(
-	__in PDEVICE_OBJECT DeviceObject,
-	__in PIRP Irp
-   )
-{
-	PIO_STACK_LOCATION	irpSp;
-	NTSTATUS			status = STATUS_SUCCESS;
-
-    UNREFERENCED_PARAMETER(DeviceObject);
-
-	//PAGED_CODE();
-
-	__try {
-		DDbgPrint("==> DokanPnp\n");
-
-		irpSp = IoGetCurrentIrpStackLocation(Irp);
-
-		switch (irpSp->MinorFunction) {
-		case IRP_MN_QUERY_REMOVE_DEVICE:
-			DDbgPrint("  IRP_MN_QUERY_REMOVE_DEVICE\n");
-			break;
-		case IRP_MN_SURPRISE_REMOVAL:
-			DDbgPrint("  IRP_MN_SURPRISE_REMOVAL\n");
-			break;
-		case IRP_MN_REMOVE_DEVICE:
-			DDbgPrint("  IRP_MN_REMOVE_DEVICE\n");
-			break;
-		case IRP_MN_CANCEL_REMOVE_DEVICE:
-			DDbgPrint("  IRP_MN_CANCEL_REMOVE_DEVICE\n");
-			break;
-		case IRP_MN_QUERY_DEVICE_RELATIONS:
-			DDbgPrint("  IRP_MN_QUERY_DEVICE_RELATIONS\n");
-			status = STATUS_INVALID_PARAMETER;
-			break;
-		default:
-			DDbgPrint("   other minnor function %d\n", irpSp->MinorFunction);
-			break;
-			//IoSkipCurrentIrpStackLocation(Irp);
-			//status = IoCallDriver(Vcb->TargetDeviceObject, Irp);
-		}
-	} __finally {
-        DokanCompleteIrpRequest(Irp, status, 0);
-
-		DDbgPrint("<== DokanPnp\n");
-	}
-
-	return status;
-}
-
-
-
 BOOLEAN
 DokanNoOpAcquire(
     __in PVOID Fcb,

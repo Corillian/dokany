@@ -285,7 +285,6 @@ DokanUserFsRequest(
 }
 
 
-
 NTSTATUS
 DokanDispatchFileSystemControl(
 	__in PDEVICE_OBJECT DeviceObject,
@@ -294,14 +293,22 @@ DokanDispatchFileSystemControl(
 {
 	NTSTATUS			status = STATUS_INVALID_PARAMETER;
 	PIO_STACK_LOCATION	irpSp;
+	PDokanFSCB			fscb;
 	PDokanVCB			vcb;
 
 	__try {
 		DDbgPrint("==> DokanFileSystemControl\n");
 		DDbgPrint("  ProcessId %lu\n", IoGetRequestorProcessId(Irp));
 
-		vcb = DeviceObject->DeviceExtension;
-		if (GetIdentifierType(vcb) != VCB) {
+		fscb = DeviceObject->DeviceExtension;
+		PrintIdType(fscb);
+		// Requests generally came with file system object context but few can arise from volume object
+		if (GetIdentifierType(fscb) == FSCB) {
+			vcb = fscb->Dcb->Vcb;
+		} else if (GetIdentifierType(fscb) == VCB) {
+			vcb = DeviceObject->DeviceExtension;
+			fscb = vcb->Dcb->FScb;
+		} else {
 			status = STATUS_INVALID_PARAMETER;
 			__leave;
 		}
@@ -319,20 +326,24 @@ DokanDispatchFileSystemControl(
 
 		case IRP_MN_MOUNT_VOLUME:
 			{
-				PVPB vpb;
+				PVPB		vpb = NULL;
 				DDbgPrint("	 IRP_MN_MOUNT_VOLUME\n");
-				if (irpSp->Parameters.MountVolume.DeviceObject != vcb->Dcb->DeviceObject) {
+
+				if (irpSp->Parameters.MountVolume.DeviceObject != fscb->Dcb->DeviceObject) {
 					DDbgPrint("   Not DokanDiskDevice\n");
-					status = STATUS_INVALID_PARAMETER;
-                    break;
+					return STATUS_INVALID_PARAMETER;
 				}
 				vpb = irpSp->Parameters.MountVolume.Vpb;
+
 				vpb->DeviceObject = vcb->DeviceObject;
 				vpb->RealDevice = vcb->DeviceObject;
 				vpb->Flags |= VPB_MOUNTED;
 				vpb->VolumeLabelLength = (USHORT)wcslen(VOLUME_LABEL) * sizeof(WCHAR);
 				RtlStringCchCopyW(vpb->VolumeLabel, sizeof(vpb->VolumeLabel) / sizeof(WCHAR), VOLUME_LABEL);
 				vpb->SerialNumber = 0x19831116;
+
+				// FsRtlNotifyVolumeEvent(, FSRTL_VOLUME_MOUNT);
+
 				status = STATUS_SUCCESS;
 			}
 			break;

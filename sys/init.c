@@ -42,7 +42,7 @@ DokanSendIoContlToMountManager(
 	KEVENT			driverEvent;
 	IO_STATUS_BLOCK	iosb;
 
-	DDbgPrint("=> DokanSnedIoContlToMountManager\n");
+	DDbgPrint("=> DokanSendIoContlToMountManager\n");
 
 	RtlInitUnicodeString(&mountManagerName, MOUNTMGR_DEVICE_NAME);
 
@@ -90,7 +90,7 @@ DokanSendIoContlToMountManager(
 	if (NT_SUCCESS(status)) {
 		DDbgPrint("  IoCallDriver success\n");
 	} else {
-		DDbgPrint("  IoCallDriver faield: 0x%x\n", status);
+		DDbgPrint("  IoCallDriver failed: 0x%x\n", status);
 	}
 
 	DDbgPrint("<= DokanSendIoContlToMountManager\n");
@@ -220,6 +220,7 @@ DokanRegisterDeviceInterface(
 	if (NT_SUCCESS(status)) {
 		DDbgPrint("  IoRegisterDeviceInterface success: %wZ\n", &Dcb->DiskDeviceInterfaceName);
 	} else {
+		RtlInitUnicodeString(&Dcb->DiskDeviceInterfaceName, NULL);
 		DDbgPrint("  IoRegisterDeviceInterface failed: 0x%x\n", status);
 		return status;
 	}
@@ -251,6 +252,7 @@ DokanRegisterDeviceInterface(
 	if (NT_SUCCESS(status)) {
 		DDbgPrint("  IoSetDeviceInterfaceState success\n");
 	} else {
+		RtlInitUnicodeString(&Dcb->MountedDeviceInterfaceName, NULL);
 		DDbgPrint("  IoSetDeviceInterfaceState failed: 0x%x\n", status);
 		return status;
 	}
@@ -396,7 +398,9 @@ DokanCreateDiskDevice(
 	WCHAR				symbolicLinkNameBuf[MAXIMUM_FILENAME_LENGTH];
 	PDEVICE_OBJECT		diskDeviceObject;
 	PDEVICE_OBJECT		fsDeviceObject;
+	PDEVICE_OBJECT		volDeviceObject;
 	PDokanDCB			dcb;
+	PDokanFSCB			fscb;
 	PDokanVCB			vcb;
 	UNICODE_STRING		diskDeviceName;
 	NTSTATUS			status;
@@ -526,9 +530,11 @@ DokanCreateDiskDevice(
 		return STATUS_INSUFFICIENT_RESOURCES;
 	}
 
+	DDbgPrint("  IoCreateDevice DeviceType: %d\n", DeviceType);
+
 	status = IoCreateDeviceSecure(
 				DriverObject,		// DriverObject
-				sizeof(DokanVCB),	// DeviceExtensionSize
+				sizeof(DokanFSCB),	// DeviceExtensionSize
 				dcb->FileSystemDeviceName, // DeviceName
 				DeviceType,			// DeviceType
 				DeviceCharacteristics,	// DeviceCharacteristics
@@ -538,29 +544,58 @@ DokanCreateDiskDevice(
 				&fsDeviceObject);	// DeviceObject
 
 	if (!NT_SUCCESS(status)) {
-		DDbgPrint("  IoCreateDevice (FILE_SYSTEM_DEVICE) failed: 0x%x\n", status);
+		DDbgPrint("  IoCreateDevice failed: 0x%x\n", status);
 		ExDeleteResourceLite(&dcb->Resource);
 		IoDeleteDevice(diskDeviceObject);
 		return status;
 	}
 	DDbgPrint("DokanFileSystemDevice: %wZ created\n", dcb->FileSystemDeviceName);
 
-	vcb = fsDeviceObject->DeviceExtension;
+	// Directly create volume device and init vcb here because it has strong dependency with fs/disk
+	// Otherwise we would have done this work when mounting the volume
 
+	status = IoCreateDevice(
+		DriverObject,		// DriverObject
+		sizeof(DokanVCB),	// DeviceExtensionSize
+		NULL, // DeviceName
+		DeviceType,			// DeviceType
+		DeviceCharacteristics,	// DeviceCharacteristics
+		FALSE,				// Not Exclusive
+		&volDeviceObject);	// DeviceObject
+
+	if (!NT_SUCCESS(status)) {
+		DDbgPrint("  IoCreateDevice failed: 0x%x\n", status);
+		ExDeleteResourceLite(&dcb->Resource);
+		IoDeleteDevice(fsDeviceObject);
+		IoDeleteDevice(diskDeviceObject);
+		return status;
+	}
+ 
+	fscb = fsDeviceObject->DeviceExtension;
+	fscb->Identifier.Type = FSCB;
+	fscb->Identifier.Size = sizeof(DokanVCB);
+
+	fscb->DeviceObject = fsDeviceObject;
+	fscb->Dcb = dcb;
+
+	dcb->FScb = fscb;
+
+	vcb = volDeviceObject->DeviceExtension;
 	vcb->Identifier.Type = VCB;
 	vcb->Identifier.Size = sizeof(DokanVCB);
 
-	vcb->DeviceObject = fsDeviceObject;
+	vcb->DeviceObject = volDeviceObject;
 	vcb->Dcb = dcb;
 
-	dcb->Vcb = vcb;
-	
+	fscb->Dcb->Vcb = vcb;
+
 	InitializeListHead(&vcb->NextFCB);
 
 	InitializeListHead(&vcb->DirNotifyList);
 	FsRtlNotifyInitializeSync(&vcb->NotifySync);
 
 	ExInitializeFastMutex(&vcb->AdvancedFCBHeaderMutex);
+
 #if _WIN32_WINNT >= 0x0501
 	FsRtlSetupAdvancedHeader(&vcb->VolumeFileHeader, &vcb->AdvancedFCBHeaderMutex);
 #else
@@ -569,20 +604,16 @@ DokanCreateDiskDevice(
 	}
 #endif
 
-
 	//
 	// Establish user-buffer access method.
 	//
 	fsDeviceObject->Flags |= DO_DIRECT_IO;
 
 	if (diskDeviceObject->Vpb) {
-		// NOTE: This can be done by IoRegisterFileSystem + IRP_MN_MOUNT_VOLUME,
-		// however that causes BSOD inside filter manager on Vista x86 after mount
-		// (mouse hover on file).
-		// Probably FS_FILTER_CALLBACKS.PreAcquireForSectionSynchronization is
-		// not correctly called in that case.
-		diskDeviceObject->Vpb->DeviceObject = fsDeviceObject;
-		diskDeviceObject->Vpb->RealDevice = fsDeviceObject;
+		// Define here because the Vpb is copied to file objects later.
+		// Looks like a redundancy with IRP_MN_MOUNT_VOLUME
+		diskDeviceObject->Vpb->DeviceObject = volDeviceObject;
+		diskDeviceObject->Vpb->RealDevice = volDeviceObject;
 		diskDeviceObject->Vpb->Flags |= VPB_MOUNTED;
 		diskDeviceObject->Vpb->VolumeLabelLength = (USHORT)wcslen(VOLUME_LABEL) * sizeof(WCHAR);
 		RtlStringCchCopyW(diskDeviceObject->Vpb->VolumeLabel,
@@ -591,20 +622,12 @@ DokanCreateDiskDevice(
 		diskDeviceObject->Vpb->SerialNumber = 0x19831116;
 	}
 
-	ObReferenceObject(fsDeviceObject);
-	ObReferenceObject(diskDeviceObject);
-
 	//
 	// Create a symbolic link for userapp to interact with the driver.
 	//
 	status = IoCreateSymbolicLink(dcb->SymbolicLinkName, dcb->DiskDeviceName);
 
 	if (!NT_SUCCESS(status)) {
-		if (diskDeviceObject->Vpb) {
-			diskDeviceObject->Vpb->DeviceObject = NULL;
-			diskDeviceObject->Vpb->RealDevice = NULL;
-			diskDeviceObject->Vpb->Flags = 0;
-		}
 		IoDeleteDevice(diskDeviceObject);
 		IoDeleteDevice(fsDeviceObject);
 		DDbgPrint("  IoCreateSymbolicLink returned 0x%x\n", status);
@@ -615,9 +638,14 @@ DokanCreateDiskDevice(
 	// Mark devices as initialized
 	diskDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 	fsDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
+	volDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 
-	//IoRegisterFileSystem(fsDeviceObject);
+	IoRegisterFileSystem(fsDeviceObject);
 
+	ObReferenceObject(volDeviceObject);
+	ObReferenceObject(fsDeviceObject);
+	ObReferenceObject(diskDeviceObject);
+	
 	if (isNetworkFileSystem) {
 		// Run FsRtlRegisterUncProvider in System thread.
 		HANDLE handle;
@@ -643,8 +671,8 @@ DokanCreateDiskDevice(
 	
 	dcb->Mounted = 1;
 
-	//DokanSendVolumeArrivalNotification(&deviceName);
 	//DokanRegisterDeviceInterface(DriverObject, diskDeviceObject, dcb);
+	DokanSendVolumeArrivalNotification(dcb->DiskDeviceName);
 
 	return STATUS_SUCCESS;
 }
@@ -654,9 +682,11 @@ VOID
 DokanDeleteDeviceObject(
 	__in PDokanDCB Dcb)
 {
+	PDokanFSCB			fscb;
 	PDokanVCB			vcb;
 
 	ASSERT(GetIdentifierType(Dcb) == DCB);
+	fscb = Dcb->FScb;
 	vcb = Dcb->Vcb;
 
     if (Dcb->SymbolicLinkName == NULL){
@@ -670,6 +700,19 @@ DokanDeleteDeviceObject(
 
 	DDbgPrint("  Delete Symbolic Name: %wZ\n", Dcb->SymbolicLinkName);
 	IoDeleteSymbolicLink(Dcb->SymbolicLinkName);
+
+	if (Dcb->MountedDeviceInterfaceName.Buffer != NULL) {
+		IoSetDeviceInterfaceState(&Dcb->MountedDeviceInterfaceName, FALSE);
+
+		RtlFreeUnicodeString(&Dcb->MountedDeviceInterfaceName);
+		RtlInitUnicodeString(&Dcb->MountedDeviceInterfaceName, NULL);
+	}
+	if (Dcb->DiskDeviceInterfaceName.Buffer != NULL) {
+		IoSetDeviceInterfaceState(&Dcb->DiskDeviceInterfaceName, FALSE);
+
+		RtlFreeUnicodeString(&Dcb->DiskDeviceInterfaceName);
+		RtlInitUnicodeString(&Dcb->DiskDeviceInterfaceName, NULL);
+	}
 
 	FreeUnicodeString(Dcb->SymbolicLinkName);
 	FreeUnicodeString(Dcb->DiskDeviceName);
@@ -685,18 +728,24 @@ DokanDeleteDeviceObject(
 		Dcb->DeviceObject->Vpb->Flags = 0;
 	}
 
-	//IoUnregisterFileSystem(vcb->DeviceObject);
+	if (vcb != NULL) {
+		DDbgPrint("  FCB allocated: %d\n", vcb->FcbAllocated);
+		DDbgPrint("  FCB     freed: %d\n", vcb->FcbFreed);
+		DDbgPrint("  CCB allocated: %d\n", vcb->CcbAllocated);
+		DDbgPrint("  CCB     freed: %d\n", vcb->CcbFreed);
 
-	DDbgPrint("  FCB allocated: %d\n", vcb->FcbAllocated);
-	DDbgPrint("  FCB     freed: %d\n", vcb->FcbFreed);
-	DDbgPrint("  CCB allocated: %d\n", vcb->CcbAllocated);
-	DDbgPrint("  CCB     freed: %d\n", vcb->CcbFreed);
+		// delete volDeviceObject
+		DDbgPrint("  Delete Volume DeviceObject\n");
+		IoDeleteDevice(vcb->DeviceObject);
+	}
+
+	IoUnregisterFileSystem(fscb->DeviceObject);
+
+	// delete fsDeviceObject
+	DDbgPrint("  Delete FS DeviceObject\n");
+	IoDeleteDevice(fscb->DeviceObject);
 
 	// delete diskDeviceObject
-	DDbgPrint("  Delete DeviceObject\n");
-	IoDeleteDevice(vcb->DeviceObject);
-
-	// delete DeviceObject
 	DDbgPrint("  Delete Disk DeviceObject\n");
 	IoDeleteDevice(Dcb->DeviceObject);
 }
