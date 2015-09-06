@@ -110,6 +110,29 @@ typedef enum _FILE_INFORMATION_CLASS {
     FileProcessIdsUsingFileInformation,      // 47
     FileNormalizedNameInformation,           // 48
     FileNetworkPhysicalNameInformation,      // 49
+	FileIdGlobalTxDirectoryInformation,		 // 50
+	FileIsRemoteDeviceInformation,           // 51
+	FileUnusedInformation,                   // 52
+	FileNumaNodeInformation,                 // 53
+	FileStandardLinkInformation,             // 54
+	FileRemoteProtocolInformation,           // 55
+
+		//
+		//  These are special versions of these operations (defined earlier)
+		//  which can be used by kernel mode drivers only to bypass security
+		//  access checks for Rename and HardLink operations.  These operations
+		//  are only recognized by the IOManager, a file system should never
+		//  receive these.
+		//
+	FileRenameInformationBypassAccessCheck,  // 56
+	FileLinkInformationBypassAccessCheck,    // 57
+	FileVolumeNameInformation,               // 58
+	FileIdInformation,                       // 59
+	FileIdExtdDirectoryInformation,          // 60
+	FileReplaceCompletionInformation,        // 61
+	FileHardLinkFullIdInformation,           // 62
+	FileIdExtdBothDirectoryInformation,      // 63
+
     FileMaximumInformation
 } FILE_INFORMATION_CLASS, *PFILE_INFORMATION_CLASS;
 

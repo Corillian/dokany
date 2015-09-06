@@ -43,13 +43,15 @@ extern ULONG g_Debug;
 
 #define DOKAN_GLOBAL_DEVICE_NAME			L"\\Device\\Dokan"
 #define DOKAN_GLOBAL_SYMBOLIC_LINK_NAME		L"\\DosDevices\\Global\\Dokan"
+#define DOKAN_GLOBAL_FS_DISK_DEVICE_NAME	L"\\Device\\DokanFs"
+#define DOKAN_GLOBAL_FS_CD_DEVICE_NAME		L"\\Device\\DokanCdFs"
+#define DOKAN_GLOBAL_FS_NETWORK_DEVICE_NAME L"\\Device\\DokanRedirector"
 
-#define DOKAN_FS_DEVICE_NAME		L"\\Device\\Dokan"
 #define DOKAN_DISK_DEVICE_NAME		L"\\Device\\Volume"
 #define DOKAN_SYMBOLIC_LINK_NAME    L"\\DosDevices\\Global\\Volume"
 
-#define DOKAN_NET_DEVICE_NAME			L"\\Device\\DokanRedirector"
-#define DOKAN_NET_SYMBOLIC_LINK_NAME    L"\\DosDevices\\Global\\DokanRedirector"
+#define DOKAN_NET_DEVICE_NAME			L"\\Device\\NetworkVolume"
+#define DOKAN_NET_SYMBOLIC_LINK_NAME    L"\\DosDevices\\Global\\NetworkVolume"
 
 #define VOLUME_LABEL			L"DOKAN"
 								// {D6CC17C5-1734-4085-BCE7-964F1E9F5DE9}
@@ -110,7 +112,6 @@ extern NPAGED_LOOKASIDE_LIST	DokanIrpEntryLookasideList;
 typedef enum _FSD_IDENTIFIER_TYPE {
 	DGL = ':DGL', // Dokan Global
     DCB = ':DCB', // Disk Control Block
-	FSCB = ':SCB', // File System Control Block
     VCB = ':VCB', // Volume Control Block
     FCB = ':FCB', // File Control Block
     CCB = ':CCB', // Context Control Block
@@ -146,6 +147,10 @@ typedef struct _DOKAN_GLOBAL {
 	FSD_IDENTIFIER	Identifier;
 	ERESOURCE		Resource;
 	PDEVICE_OBJECT	DeviceObject;
+	PDEVICE_OBJECT	FsDiskDeviceObject;
+	PDEVICE_OBJECT	FsCdDeviceObject;
+	PDEVICE_OBJECT	FsNetworkDeviceObject;
+	HANDLE			MupHandle;
 	ULONG			MountId;
 	// the list of waiting IRP for mount service
 	IRP_LIST		PendingService;
@@ -164,7 +169,6 @@ typedef struct _DokanDiskControlBlock {
 	PDRIVER_OBJECT			DriverObject;
 	PDEVICE_OBJECT			DeviceObject;
 	
-	PVOID					FScb;
 	PVOID					Vcb;
 
 	// the list of waiting Event
@@ -173,12 +177,10 @@ typedef struct _DokanDiskControlBlock {
 	IRP_LIST				NotifyEvent;
 
 	PUNICODE_STRING			DiskDeviceName;
-	PUNICODE_STRING			FileSystemDeviceName;
 	PUNICODE_STRING			SymbolicLinkName;
 
 	DEVICE_TYPE				DeviceType;
 	ULONG					DeviceCharacteristics;
-	HANDLE					MupHandle;
 	UNICODE_STRING			MountedDeviceInterfaceName;
 	UNICODE_STRING			DiskDeviceInterfaceName;
 
@@ -208,17 +210,6 @@ typedef struct _DokanDiskControlBlock {
 
     ULONG           IrpTimeout;
 } DokanDCB, *PDokanDCB;
-
-
-typedef struct _DokanFileSystemControlBlock {
-
-	FSD_IDENTIFIER				Identifier;
-
-	ERESOURCE					Resource;
-	PDEVICE_OBJECT				DeviceObject;
-	PDokanDCB					Dcb;
-
-} DokanFSCB, *PDokanFSCB;
 
 
 typedef struct _DokanVolumeControlBlock {
@@ -629,6 +620,11 @@ DokanCreateDiskDevice(
 	__in ULONG			DeviceCharacteristics,
 	__out PDokanDCB* Dcb);
 
+VOID
+DokanInitVpb(
+	__in PVPB Vpb,
+	__in PDEVICE_OBJECT DiskDevice,
+	__in PDEVICE_OBJECT VolumeDevice);
 
 VOID
 DokanDeleteDeviceObject(

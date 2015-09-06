@@ -181,7 +181,7 @@ RegisterPendingIrpMain(
     KeReleaseSpinLock(&IrpList->ListLock, oldIrql);
 
 	DDbgPrint("<== DokanRegisterPendingIrpMain\n");
-    return STATUS_PENDING;;
+    return STATUS_PENDING;
 }
 
 

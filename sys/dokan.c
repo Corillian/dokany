@@ -226,6 +226,8 @@ Return Value:
 	fastIoDispatch = ExAllocatePool(sizeof(FAST_IO_DISPATCH));
     if (!fastIoDispatch)
     {
+		IoDeleteDevice(dokanGlobal->FsDiskDeviceObject);
+		IoDeleteDevice(dokanGlobal->FsCdDeviceObject);
         IoDeleteDevice(dokanGlobal->DeviceObject);
         DDbgPrint("  ExAllocatePool failed");
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -266,6 +268,8 @@ Return Value:
 	status = FsRtlRegisterFileSystemFilterCallbacks(DriverObject, &filterCallbacks);
 
 	if (!NT_SUCCESS(status)) {
+		IoDeleteDevice(dokanGlobal->FsDiskDeviceObject);
+		IoDeleteDevice(dokanGlobal->FsCdDeviceObject);
 		IoDeleteDevice(dokanGlobal->DeviceObject);
 		DDbgPrint("  FsRtlRegisterFileSystemFilterCallbacks returned 0x%x\n", status);
 		return status;
@@ -302,14 +306,29 @@ Return Value:
 	PDEVICE_OBJECT	deviceObject = DriverObject->DeviceObject;
 	WCHAR			symbolicLinkBuf[] = DOKAN_GLOBAL_SYMBOLIC_LINK_NAME;
 	UNICODE_STRING	symbolicLinkName;
+	PDOKAN_GLOBAL dokanGlobal;
 
 	//PAGED_CODE();
 	DDbgPrint("==> DokanUnload\n");
 
-	if (GetIdentifierType(deviceObject->DeviceExtension) == DGL) {
+	dokanGlobal = deviceObject->DeviceExtension;
+	if (GetIdentifierType(dokanGlobal) == DGL) {
 		DDbgPrint("  Delete Global DeviceObject\n");
+
 		RtlInitUnicodeString(&symbolicLinkName, symbolicLinkBuf);
 		IoDeleteSymbolicLink(&symbolicLinkName);
+
+		if (dokanGlobal->MupHandle) {
+			FsRtlDeregisterUncProvider(dokanGlobal->MupHandle);
+		}
+
+		IoUnregisterFileSystem(dokanGlobal->FsDiskDeviceObject);
+		IoUnregisterFileSystem(dokanGlobal->FsCdDeviceObject);
+		IoUnregisterFileSystem(dokanGlobal->FsNetworkDeviceObject);
+
+		IoDeleteDevice(dokanGlobal->FsDiskDeviceObject);
+		IoDeleteDevice(dokanGlobal->FsCdDeviceObject);
+		IoDeleteDevice(dokanGlobal->FsNetworkDeviceObject);
 		IoDeleteDevice(deviceObject);
 	}
 

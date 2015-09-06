@@ -104,6 +104,8 @@ DispatchCreate(
 
 	}
 
+	DbgPrint("###Create %04d\n", eventId);
+
 	// to open no directory file
 	// event if this flag is not specified,
 	// there is a case to open non directory file
@@ -112,10 +114,10 @@ DispatchCreate(
 	}
 
 	if (options & FILE_DELETE_ON_CLOSE) {
+		DbgPrint("	DeleteOnClose\n");
 		EventContext->Operation.Create.FileAttributes |= FILE_FLAG_DELETE_ON_CLOSE;
 	}
 
-	DbgPrint("###Create %04d\n", eventId);
 	//DbgPrint("### OpenInfo %X\n", openInfo);
 	openInfo->EventId = eventId++;
 

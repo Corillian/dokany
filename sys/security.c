@@ -71,6 +71,7 @@ DokanDispatchQuerySecurity(
 		}
 		fcb = ccb->Fcb;
         if (fcb == NULL) {
+			DDbgPrint("    fcb == NULL\n");
             status = STATUS_INSUFFICIENT_RESOURCES;
             __leave;
         }
